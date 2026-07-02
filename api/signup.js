@@ -76,6 +76,7 @@ async function handleDatabaseMode(email) {
                         email: subscriber.email,
                         created_at: subscriber.created_at
                     }
+                }
             };
         }
         
