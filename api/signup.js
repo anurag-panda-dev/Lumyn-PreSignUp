@@ -1,21 +1,98 @@
 // ========================================
-// LUMYN BAND - SECURE BACKEND HANDLER
+// LUMYN BAND - EMAIL SIGNUP HANDLER
 // Vercel Serverless Function
+// 
+// Works in 2 modes:
+// 1. DEMO MODE (default) - no database required
+// 2. DATABASE MODE (optional) - with Neon PostgreSQL
 // ========================================
-
-import pkg from 'pg';
-const { Client } = pkg;
 
 /**
  * POST /api/signup
- * Handles email signup with secure Neon database connection
+ * Handles email signup registration
  * 
  * Expected request body:
  * { email: "user@example.com" }
  * 
- * Environment variables required:
- * - POSTGRES_URL_NO_SSL (Neon connection string)
+ * Optional environment variables:
+ * - POSTGRES_URL_NO_SSL or POSTGRES_URL (enables database mode)
  */
+
+// In-memory storage for demo mode (resets on deployment)
+const demoSubscribers = new Set();
+
+async function handleDatabaseMode(email) {
+    try {
+        const { sql } = await import('@vercel/postgres');
+        
+        const result = await sql`
+            INSERT INTO subscribers (email, created_at)
+            VALUES (${email}, NOW())
+            ON CONFLICT (email) DO UPDATE
+            SET updated_at = NOW()
+            RETURNING id, email, created_at;
+        `;
+
+        if (result.rows && result.rows.length > 0) {
+            const subscriber = result.rows[0];
+            console.log(`✓ Subscriber added to DB: ${subscriber.email}`);
+            return {
+                status: 201,
+                data: {
+                    message: 'Successfully registered for early access',
+                    subscriber: {
+                        id: subscriber.id,
+                        email: subscriber.email,
+                        created_at: subscriber.created_at
+                    }
+                }
+            };
+        }
+        
+        return {
+            status: 500,
+            data: { message: 'Failed to insert subscriber' }
+        };
+    } catch (dbError) {
+        console.error('Database error:', dbError.message);
+        
+        if (dbError.message?.includes('UNIQUE') || dbError.code === '23505') {
+            return {
+                status: 409,
+                data: { message: 'This email is already registered for early access' }
+            };
+        }
+
+        return {
+            status: 500,
+            data: { message: 'Database error. Please try again later.' }
+        };
+    }
+}
+
+function handleDemoMode(email) {
+    if (demoSubscribers.has(email)) {
+        return {
+            status: 409,
+            data: { message: 'This email is already registered for early access' }
+        };
+    }
+
+    demoSubscribers.add(email);
+    console.log(`✓ Demo signup: ${email} (Total: ${demoSubscribers.size})`);
+
+    return {
+        status: 201,
+        data: {
+            message: 'Successfully registered for early access',
+            subscriber: {
+                id: Math.random().toString(36).substr(2, 9),
+                email: email,
+                created_at: new Date().toISOString()
+            }
+        }
+    };
+}
 
 export default async function handler(req, res) {
     // Only allow POST requests
@@ -23,7 +100,6 @@ export default async function handler(req, res) {
         return res.status(405).json({ message: 'Method not allowed' });
     }
 
-    let client;
     try {
         const { email } = req.body;
 
@@ -32,7 +108,6 @@ export default async function handler(req, res) {
             return res.status(400).json({ message: 'Email is required' });
         }
 
-        // Sanitize and validate email
         const sanitizedEmail = email.trim().toLowerCase();
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -44,74 +119,22 @@ export default async function handler(req, res) {
             return res.status(400).json({ message: 'Email too long' });
         }
 
-        // ===== DATABASE CONNECTION =====
-        const connectionString = process.env.POSTGRES_URL_NO_SSL;
-        if (!connectionString) {
-            console.error('POSTGRES_URL_NO_SSL not set');
-            return res.status(500).json({
-                message: 'Database configuration error. Please check environment variables.'
-            });
-        }
+        // ===== DETERMINE MODE =====
+        const hasDatabase = process.env.POSTGRES_URL_NO_SSL || process.env.POSTGRES_URL;
 
-        client = new Client({
-            connectionString: connectionString,
-            ssl: false
-        });
-
-        await client.connect();
-
-        // ===== DATABASE INSERTION =====
-        // Using parameterized queries to prevent SQL injection
-        const query = `
-            INSERT INTO subscribers (email, created_at)
-            VALUES ($1, NOW())
-            ON CONFLICT (email) DO UPDATE
-            SET updated_at = NOW()
-            RETURNING id, email, created_at;
-        `;
-
-        const result = await client.query(query, [sanitizedEmail]);
-
-        if (result.rows && result.rows.length > 0) {
-            const subscriber = result.rows[0];
-            console.log(`✓ Subscriber added: ${subscriber.email}`);
-
-            return res.status(201).json({
-                message: 'Successfully registered for early access',
-                subscriber: {
-                    id: subscriber.id,
-                    email: subscriber.email,
-                    created_at: subscriber.created_at
-                }
-            });
+        let result;
+        if (hasDatabase) {
+            result = await handleDatabaseMode(sanitizedEmail);
         } else {
-            return res.status(500).json({ message: 'Failed to insert subscriber' });
+            result = handleDemoMode(sanitizedEmail);
         }
+
+        return res.status(result.status).json(result.data);
 
     } catch (error) {
         console.error('Signup error:', error);
-
-        // Handle specific database errors
-        if (error.code === '23505') {
-            return res.status(409).json({
-                message: 'This email is already registered for early access'
-            });
-        }
-
-        if (error.code === '42P01') {
-            return res.status(500).json({
-                message: 'Database not initialized. Run setup script first.',
-                hint: 'Execute: node scripts/setup-db.js'
-            });
-        }
-
-        // Generic error response
         return res.status(500).json({
             message: 'An error occurred processing your request. Please try again later.'
         });
-    } finally {
-        if (client) {
-            await client.end();
-        }
     }
 }
