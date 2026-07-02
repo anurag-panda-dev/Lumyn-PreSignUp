@@ -1,0 +1,30 @@
+{
+  "name": "lumyn-band",
+  "version": "1.0.0",
+  "description": "Lumyn Band - Premium Neurotechnology Landing Page",
+  "type": "module",
+  "main": "index.html",
+  "scripts": {
+    "dev": "node --watch scripts/dev-server.js",
+    "setup:db": "node scripts/setup-db.js",
+    "build": "echo 'Static site - no build required'"
+  },
+  "keywords": [
+    "neurotechnology",
+    "flow-state",
+    "landing-page",
+    "premium"
+  ],
+  "author": "Lumyn Band",
+  "license": "MIT",
+  "dependencies": {
+    "@vercel/postgres": "^0.10.0",
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "dotenv": "^16.3.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
