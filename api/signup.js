@@ -67,14 +67,16 @@ async function handleDatabaseMode(email) {
               }
             })();
             
-            return res.status(201).json({
-              message: 'Successfully registered for early access',
-              subscriber: {
-                id: subscriber.id,
-                email: subscriber.email,
-                created_at: subscriber.created_at
-              }
-            });
+            return {
+              status: 201,
+                data: {
+                    message: 'Successfully registered for early access',
+                    subscriber: {
+                        id: subscriber.id,
+                        email: subscriber.email,
+                        created_at: subscriber.created_at
+                    }
+            };
         }
         
         return {
