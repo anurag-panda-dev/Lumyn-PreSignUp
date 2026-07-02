@@ -3,7 +3,8 @@
 // Vercel Serverless Function
 // ========================================
 
-import { sql } from '@vercel/postgres';
+import pkg from 'pg';
+const { Client } = pkg;
 
 /**
  * POST /api/signup
@@ -22,6 +23,7 @@ export default async function handler(req, res) {
         return res.status(405).json({ message: 'Method not allowed' });
     }
 
+    let client;
     try {
         const { email } = req.body;
 
@@ -42,15 +44,33 @@ export default async function handler(req, res) {
             return res.status(400).json({ message: 'Email too long' });
         }
 
+        // ===== DATABASE CONNECTION =====
+        const connectionString = process.env.POSTGRES_URL_NO_SSL;
+        if (!connectionString) {
+            console.error('POSTGRES_URL_NO_SSL not set');
+            return res.status(500).json({
+                message: 'Database configuration error. Please check environment variables.'
+            });
+        }
+
+        client = new Client({
+            connectionString: connectionString,
+            ssl: false
+        });
+
+        await client.connect();
+
         // ===== DATABASE INSERTION =====
         // Using parameterized queries to prevent SQL injection
-        const result = await sql`
+        const query = `
             INSERT INTO subscribers (email, created_at)
-            VALUES (${sanitizedEmail}, NOW())
+            VALUES ($1, NOW())
             ON CONFLICT (email) DO UPDATE
             SET updated_at = NOW()
             RETURNING id, email, created_at;
         `;
+
+        const result = await client.query(query, [sanitizedEmail]);
 
         if (result.rows && result.rows.length > 0) {
             const subscriber = result.rows[0];
@@ -72,13 +92,13 @@ export default async function handler(req, res) {
         console.error('Signup error:', error);
 
         // Handle specific database errors
-        if (error.code === 'UNIQUE_VIOLATION') {
+        if (error.code === '23505') {
             return res.status(409).json({
                 message: 'This email is already registered for early access'
             });
         }
 
-        if (error.code === 'UNDEFINED_TABLE') {
+        if (error.code === '42P01') {
             return res.status(500).json({
                 message: 'Database not initialized. Run setup script first.',
                 hint: 'Execute: node scripts/setup-db.js'
@@ -89,5 +109,9 @@ export default async function handler(req, res) {
         return res.status(500).json({
             message: 'An error occurred processing your request. Please try again later.'
         });
+    } finally {
+        if (client) {
+            await client.end();
+        }
     }
 }
