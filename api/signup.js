@@ -35,18 +35,46 @@ async function handleDatabaseMode(email) {
 
         if (result.rows && result.rows.length > 0) {
             const subscriber = result.rows[0];
-            console.log(`✓ Subscriber added to DB: ${subscriber.email}`);
-            return {
-                status: 201,
-                data: {
-                    message: 'Successfully registered for early access',
-                    subscriber: {
-                        id: subscriber.id,
-                        email: subscriber.email,
-                        created_at: subscriber.created_at
-                    }
+            // after: const subscriber = result.rows[0];
+            console.log(`✓ Subscriber added: ${subscriber.email}`);
+
+            // fire webhook to Apps Script to send email
+            (async () => {
+              try {
+                const webhookUrl = process.env.APPS_SCRIPT_WEBHOOK_URL;
+                const webhookSecret = process.env.APPS_SCRIPT_SECRET;
+                if (webhookUrl && webhookSecret) {
+                  // Use global fetch (Node 18+ on Vercel). If not available, install node-fetch.
+                  await fetch(webhookUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      secret: webhookSecret,
+                      email: subscriber.email,
+                      name: '', // optional: if you collect name add it here
+                      created_at: subscriber.created_at,
+                      event: 'signup',
+                      // optional: ip_address, user_agent
+                    })
+                  });
+                  console.log('✓ Webhook posted to Apps Script');
+                } else {
+                  console.log('APPS_SCRIPT_WEBHOOK_URL or APPS_SCRIPT_SECRET not set — skipping email webhook.');
                 }
-            };
+              } catch (err) {
+                // Do not crash signup if webhook fails — just log the error.
+                console.error('Webhook error:', err);
+              }
+            })();
+            
+            return res.status(201).json({
+              message: 'Successfully registered for early access',
+              subscriber: {
+                id: subscriber.id,
+                email: subscriber.email,
+                created_at: subscriber.created_at
+              }
+            });
         }
         
         return {
